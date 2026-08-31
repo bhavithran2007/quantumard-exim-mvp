@@ -1,24 +1,49 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import PageHeader from "@/components/ui/PageHeader";
 import StatusBadge from "@/components/ui/StatusBadge";
-import { buyers as initialBuyers } from "@/lib/data";
+import { buyers as demoBuyers } from "@/lib/data";
+import { fetchBuyers, createBuyer, updateBuyer, deleteBuyer } from "@/lib/api";
 import { Buyer } from "@/types";
-import { Search, Plus, Edit2, Trash2, ExternalLink, X } from "lucide-react";
+import { Search, Plus, Edit2, Trash2, ExternalLink, X, Loader2 } from "lucide-react";
 
-const CATEGORIES = ["Textiles", "Electronics", "Furniture", "Home Goods", "Sportswear", "Ceramics", "Leather Goods"];
-const STATUSES = ["Active", "Inactive", "Prospect"] as const;
-const COUNTRIES = ["Norway", "Germany", "USA", "UAE", "Australia", "Canada", "Japan", "Spain", "UK", "France"];
+const CATEGORIES = ["Textiles","Electronics","Furniture","Home Goods","Sportswear","Ceramics","Leather Goods"];
+const STATUSES = ["Active","Inactive","Prospect"] as const;
+const COUNTRIES = ["Norway","Germany","USA","UAE","Australia","Canada","Japan","Spain","UK","France","India","China","Brazil","Egypt","Nigeria","South Korea","Sweden","Switzerland","New Zealand"];
 
 function BuyerModal({ buyer, onClose, onSave }: { buyer?: Buyer; onClose: () => void; onSave: (b: Buyer) => void }) {
   const [form, setForm] = useState<Partial<Buyer>>(buyer || { status: "Active", country: "USA", category: "Textiles" });
+  const [saving, setSaving] = useState(false);
   const set = (k: keyof Buyer, v: string) => setForm(f => ({ ...f, [k]: v }));
 
-  const handleSubmit = () => {
-    if (!form.companyName || !form.email) return alert("Company name and email required");
-    const id = buyer?.id || String(Date.now());
-    const buyerId = buyer?.buyerId || `BUY-${String(Date.now()).slice(-3)}`;
-    onSave({ ...form, id, buyerId, createdAt: buyer?.createdAt || new Date().toISOString().split("T")[0] } as Buyer);
+  const handleSubmit = async () => {
+    if (!form.companyName) return alert("Company name required");
+    setSaving(true);
+    try {
+      const payload = {
+        company_name: form.companyName,
+        country: form.country,
+        contact_person: form.contactPerson,
+        email: form.email,
+        phone: form.phone,
+        website: form.website,
+        linkedin: form.linkedin,
+        category: form.category,
+        status: form.status || "Active",
+        notes: form.notes,
+      };
+      let result;
+      if (buyer?.id) {
+        result = await updateBuyer(buyer.id, payload);
+      } else {
+        result = await createBuyer(payload);
+      }
+      onSave(normalizeBuyer(result));
+    } catch {
+      alert("Failed to save. Please try again.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -32,7 +57,7 @@ function BuyerModal({ buyer, onClose, onSave }: { buyer?: Buyer; onClose: () => 
           {[
             { label: "Company Name *", key: "companyName", full: true },
             { label: "Contact Person", key: "contactPerson" },
-            { label: "Email *", key: "email" },
+            { label: "Email", key: "email" },
             { label: "Phone", key: "phone" },
             { label: "Website", key: "website" },
             { label: "LinkedIn", key: "linkedin" },
@@ -72,20 +97,50 @@ function BuyerModal({ buyer, onClose, onSave }: { buyer?: Buyer; onClose: () => 
         </div>
         <div className="flex justify-end gap-2 p-4 border-t">
           <button onClick={onClose} className="px-3 py-1.5 text-sm text-gray-600 border border-gray-200 rounded hover:bg-gray-50">Cancel</button>
-          <button onClick={handleSubmit} className="px-3 py-1.5 text-sm text-white bg-blue-600 rounded hover:bg-blue-700">Save</button>
+          <button onClick={handleSubmit} disabled={saving} className="px-3 py-1.5 text-sm text-white bg-blue-600 rounded hover:bg-blue-700 flex items-center gap-1.5 disabled:opacity-60">
+            {saving && <Loader2 size={13} className="animate-spin" />}Save
+          </button>
         </div>
       </div>
     </div>
   );
 }
 
+function normalizeBuyer(b: any): Buyer {
+  return {
+    id: b.id,
+    buyerId: b.buyer_id || b.buyerId || "",
+    companyName: b.company_name || b.companyName || "",
+    country: b.country || "",
+    contactPerson: b.contact_person || b.contactPerson || "",
+    email: b.email || "",
+    phone: b.phone || "",
+    website: b.website,
+    linkedin: b.linkedin,
+    category: b.category || "",
+    status: b.status || "Active",
+    notes: b.notes,
+    createdAt: b.created_at || b.createdAt || "",
+  };
+}
+
 export default function BuyersPage() {
-  const [buyers, setBuyers] = useState(initialBuyers);
+  const [buyers, setBuyers] = useState<Buyer[]>(demoBuyers);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("All");
   const [filterCategory, setFilterCategory] = useState("All");
   const [modal, setModal] = useState<{ open: boolean; buyer?: Buyer }>({ open: false });
   const [viewBuyer, setViewBuyer] = useState<Buyer | null>(null);
+
+  useEffect(() => {
+    fetchBuyers()
+      .then(data => {
+        if (data && data.length > 0) setBuyers(data.map(normalizeBuyer));
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
 
   const filtered = buyers.filter(b => {
     const matchSearch = b.companyName.toLowerCase().includes(search.toLowerCase()) ||
@@ -97,12 +152,18 @@ export default function BuyersPage() {
   });
 
   const handleSave = (b: Buyer) => {
-    setBuyers(prev => prev.find(x => x.id === b.id) ? prev.map(x => x.id === b.id ? b : x) : [...prev, b]);
+    setBuyers(prev => prev.find(x => x.id === b.id) ? prev.map(x => x.id === b.id ? b : x) : [b, ...prev]);
     setModal({ open: false });
   };
 
-  const handleDelete = (id: string) => {
-    if (confirm("Delete this buyer?")) setBuyers(prev => prev.filter(b => b.id !== id));
+  const handleDelete = async (id: string) => {
+    if (!confirm("Delete this buyer?")) return;
+    try {
+      await deleteBuyer(id);
+      setBuyers(prev => prev.filter(b => b.id !== id));
+    } catch {
+      alert("Failed to delete");
+    }
   };
 
   return (
@@ -110,7 +171,6 @@ export default function BuyersPage() {
       <PageHeader title="Buyer Management" subtitle={`${buyers.length} buyers total`}
         action={<button onClick={() => setModal({ open: true })} className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"><Plus size={15} />Add Buyer</button>} />
 
-      {/* Filters */}
       <div className="flex flex-wrap gap-3 mb-4">
         <div className="relative">
           <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -119,26 +179,22 @@ export default function BuyersPage() {
         </div>
         <select className="text-sm border border-gray-200 rounded px-2.5 py-1.5 focus:outline-none focus:border-blue-400"
           value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
-          <option>All</option>
-          {STATUSES.map(s => <option key={s}>{s}</option>)}
+          <option>All</option>{STATUSES.map(s => <option key={s}>{s}</option>)}
         </select>
         <select className="text-sm border border-gray-200 rounded px-2.5 py-1.5 focus:outline-none focus:border-blue-400"
           value={filterCategory} onChange={e => setFilterCategory(e.target.value)}>
-          <option>All</option>
-          {CATEGORIES.map(c => <option key={c}>{c}</option>)}
+          <option>All</option>{CATEGORIES.map(c => <option key={c}>{c}</option>)}
         </select>
+        {loading && <Loader2 size={16} className="animate-spin text-gray-400 self-center" />}
         <span className="text-sm text-gray-500 self-center">{filtered.length} results</span>
       </div>
 
-      {/* Table */}
       <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 border-b border-gray-200">
-            <tr>
-              {["Buyer ID", "Company", "Country", "Contact", "Email", "Category", "Status", "Actions"].map(h => (
-                <th key={h} className="text-left text-xs font-semibold text-gray-500 px-4 py-2.5 uppercase tracking-wide">{h}</th>
-              ))}
-            </tr>
+            <tr>{["Buyer ID","Company","Country","Contact","Email","Category","Status","Actions"].map(h => (
+              <th key={h} className="text-left text-xs font-semibold text-gray-500 px-4 py-2.5 uppercase tracking-wide">{h}</th>
+            ))}</tr>
           </thead>
           <tbody>
             {filtered.map(b => (
@@ -166,7 +222,6 @@ export default function BuyersPage() {
 
       {modal.open && <BuyerModal buyer={modal.buyer} onClose={() => setModal({ open: false })} onSave={handleSave} />}
 
-      {/* Profile Modal */}
       {viewBuyer && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-lg shadow-xl w-full max-w-md">
@@ -184,16 +239,7 @@ export default function BuyersPage() {
                   <div className="text-sm text-gray-500">{viewBuyer.buyerId} · {viewBuyer.country}</div>
                 </div>
               </div>
-              {[
-                ["Contact Person", viewBuyer.contactPerson],
-                ["Email", viewBuyer.email],
-                ["Phone", viewBuyer.phone],
-                ["Category", viewBuyer.category],
-                ["Status", viewBuyer.status],
-                ["Website", viewBuyer.website],
-                ["Member Since", viewBuyer.createdAt],
-                ["Notes", viewBuyer.notes],
-              ].filter(([, v]) => v).map(([k, v]) => (
+              {[["Contact Person",viewBuyer.contactPerson],["Email",viewBuyer.email],["Phone",viewBuyer.phone],["Category",viewBuyer.category],["Status",viewBuyer.status],["Website",viewBuyer.website],["Member Since",viewBuyer.createdAt],["Notes",viewBuyer.notes]].filter(([,v])=>v).map(([k,v])=>(
                 <div key={k} className="flex justify-between text-sm">
                   <span className="text-gray-500">{k}</span>
                   <span className="font-medium text-gray-900">{v}</span>
