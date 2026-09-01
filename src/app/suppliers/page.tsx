@@ -4,7 +4,8 @@ import PageHeader from "@/components/ui/PageHeader";
 import { suppliers as demoSuppliers } from "@/lib/data";
 import { fetchSuppliers, createSupplier, updateSupplier, deleteSupplier, importSuppliers, bulkDeleteSuppliers } from "@/lib/api";
 import { Supplier } from "@/types";
-import { Search, Plus, Edit2, Trash2, ExternalLink, X, Loader2, Upload, Download, CheckCircle, AlertCircle, ChevronLeft, ChevronRight } from "lucide-react";
+import { Search, Plus, Edit2, Trash2, ExternalLink, X, Loader2, Upload, Download, CheckCircle, AlertCircle, ChevronLeft, ChevronRight, FileSpreadsheet } from "lucide-react";
+import * as XLSX from "xlsx";
 
 const PAGE_SIZES = [25, 50, 100];
 
@@ -20,21 +21,16 @@ function normalize(s: any): Supplier {
   };
 }
 
-function parseCSV(text: string): any[] {
-  const lines = text.trim().split(/\r?\n/);
-  if (lines.length < 2) return [];
-  const headers = lines[0].split(",").map(h => h.trim().replace(/^"|"$/g, "").toLowerCase().replace(/\s+/g, "_"));
-  return lines.slice(1).filter(l => l.trim()).map(line => {
-    const vals: string[] = [];
-    let cur = "", inQ = false;
-    for (let i = 0; i < line.length; i++) {
-      if (line[i] === '"') { inQ = !inQ; }
-      else if (line[i] === ',' && !inQ) { vals.push(cur.trim()); cur = ""; }
-      else { cur += line[i]; }
-    }
-    vals.push(cur.trim());
+function parseExcel(buffer: ArrayBuffer): any[] {
+  const wb = XLSX.read(buffer, { type: "array" });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const rows: any[] = XLSX.utils.sheet_to_json(ws, { defval: "" });
+  return rows.map(row => {
     const obj: any = {};
-    headers.forEach((h, i) => { obj[h] = (vals[i] || "").replace(/^"|"$/g, "").trim(); });
+    Object.keys(row).forEach(k => {
+      const key = k.trim().toLowerCase().replace(/\s+/g, "_");
+      obj[key] = String(row[k] ?? "").trim();
+    });
     return obj;
   });
 }
@@ -61,14 +57,14 @@ function CSVImportModal({ onClose, onImported }: { onClose: () => void; onImport
   const [error, setError] = useState("");
 
   const downloadTemplate = () => {
-    const csv = [
-      "company_name,location,contact_person,email,phone,moq,lead_time,categories,reliability_score",
-      '"Acme Factory","Shanghai, China",Li Wei,li@acme.cn,+86 21 0000 1234,500 pcs,30 days,"Textiles, Garments",88',
-      '"Beta Mfg","Mumbai, India",Raj Patel,raj@beta.in,+91 22 0000 0000,200 pcs,25 days,Sportswear,82',
-    ].join("\n");
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
-    a.download = "suppliers_template.csv"; a.click();
+    const ws = XLSX.utils.aoa_to_sheet([
+      ["company_name","location","contact_person","email","phone","moq","lead_time","categories","reliability_score"],
+      ["Acme Factory","Shanghai, China","Li Wei","li@acme.cn","+86 21 0000 1234","500 pcs","30 days","Textiles, Garments","88"],
+      ["Beta Mfg","Mumbai, India","Raj Patel","raj@beta.in","+91 22 0000 0000","200 pcs","25 days","Sportswear","82"],
+    ]);
+    const wb2 = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb2, ws, "Suppliers");
+    XLSX.writeFile(wb2, "suppliers_template.xlsx");
   };
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -77,12 +73,12 @@ function CSVImportModal({ onClose, onImported }: { onClose: () => void; onImport
     const reader = new FileReader();
     reader.onload = ev => {
       try {
-        const rows = parseCSV(ev.target?.result as string);
-        if (rows.length === 0) { setError("No valid rows found. Check CSV format."); return; }
+        const rows = parseExcel(ev.target?.result as ArrayBuffer);
+        if (rows.length === 0) { setError("No valid rows found. Check that your Excel file has a header row and data."); return; }
         setAllRows(rows); setPreview(rows.slice(0, 5));
-      } catch { setError("Could not parse CSV."); }
+      } catch { setError("Could not read Excel file. Make sure it\'s a valid .xlsx file."); }
     };
-    reader.readAsText(f);
+    reader.readAsArrayBuffer(f);
   };
 
   const handleImport = async () => {
@@ -100,14 +96,14 @@ function CSVImportModal({ onClose, onImported }: { onClose: () => void; onImport
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
         <div className="flex items-center justify-between p-4 border-b">
-          <h2 className="font-semibold text-gray-900">Import Suppliers from CSV</h2>
+          <h2 className="font-semibold text-gray-900">Import Suppliers from Excel</h2>
           <button onClick={onClose}><X size={18} className="text-gray-400" /></button>
         </div>
         <div className="p-4 space-y-4 overflow-y-auto flex-1">
           <div className="bg-purple-50 border border-purple-200 rounded p-3 text-xs text-purple-800 space-y-1">
             <p className="font-semibold">Required: <span className="font-mono">company_name</span></p>
             <p>Optional: <span className="font-mono">location, contact_person, email, phone, moq, lead_time, categories, reliability_score, supplier_id</span></p>
-            <p className="text-purple-600">For multiple categories, quote the field: <span className="font-mono">"Textiles, Garments"</span></p>
+            <p className="text-purple-600">For multiple categories, put them comma-separated in one cell: <span className="font-mono">Textiles, Garments</span> — Excel handles commas natively!</p>
           </div>
           <button onClick={downloadTemplate} className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-gray-200 rounded hover:bg-gray-50 text-gray-600">
             <Download size={14} />Download sample template
@@ -117,10 +113,10 @@ function CSVImportModal({ onClose, onImported }: { onClose: () => void; onImport
             onDragOver={e => e.preventDefault()}
             onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) { const dt = new DataTransfer(); dt.items.add(f); fileRef.current!.files = dt.files; handleFile({ target: fileRef.current! } as any); }}}>
             <Upload size={28} className="mx-auto text-gray-400 mb-2" />
-            <p className="text-sm font-medium text-gray-700">{fileName || "Click or drag & drop your CSV"}</p>
+            <p className="text-sm font-medium text-gray-700">{fileName || "Click or drag & drop your Excel file (.xlsx)"}</p>
             {allRows.length > 0 && <p className="text-xs text-purple-600 mt-1">{allRows.length} rows ready to import</p>}
           </div>
-          <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden" onChange={handleFile} />
+          <input ref={fileRef} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" className="hidden" onChange={handleFile} />
 
           {preview.length > 0 && (
             <div>
@@ -255,7 +251,7 @@ export default function SuppliersPage() {
       <PageHeader title="Supplier Management" subtitle={`${suppliers.length} suppliers`}
         action={
           <div className="flex items-center gap-2">
-            <button onClick={() => setImportModal(true)} className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 text-gray-700 text-sm rounded hover:bg-gray-50"><Upload size={15} />Import CSV</button>
+            <button onClick={() => setImportModal(true)} className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 text-gray-700 text-sm rounded hover:bg-gray-50"><FileSpreadsheet size={15} />Import Excel</button>
             <button onClick={() => setModal({ open: true })} className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"><Plus size={15} />Add Supplier</button>
           </div>
         } />

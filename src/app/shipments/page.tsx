@@ -20,12 +20,15 @@ function ShipmentModal({ shipment, onClose, onSave }: { shipment?: any; onClose:
     status: shipment.status,
   } : { status: "Booked", freight_type: "Sea" });
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
   const set = (k: string, v: any) => setForm((f: any) => ({ ...f, [k]: v }));
 
   const handleSubmit = async () => {
-    if (!form.order_number || !form.forwarder) return alert("Order number and forwarder required");
-    setSaving(true);
-    try { await onSave(form); } finally { setSaving(false); }
+    if (!form.forwarder) { setSaveError("Forwarder is required."); return; }
+    setSaving(true); setSaveError("");
+    try { await onSave(form); }
+    catch (e: any) { setSaveError(e.message || "Failed to save. Please check your inputs and try again."); }
+    finally { setSaving(false); }
   };
 
   return (
@@ -66,6 +69,9 @@ function ShipmentModal({ shipment, onClose, onSave }: { shipment?: any; onClose:
             </select>
           </div>
         </div>
+        {saveError && (
+          <div className="mx-4 mb-0 mt-0 text-red-600 text-sm bg-red-50 border border-red-200 rounded px-3 py-2">{saveError}</div>
+        )}
         <div className="flex justify-end gap-2 p-4 border-t">
           <button onClick={onClose} className="px-3 py-1.5 text-sm border border-gray-200 rounded text-gray-600">Cancel</button>
           <button onClick={handleSubmit} disabled={saving} className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-60">

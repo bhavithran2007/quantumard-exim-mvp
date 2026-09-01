@@ -5,35 +5,30 @@ import StatusBadge from "@/components/ui/StatusBadge";
 import { buyers as demoBuyers } from "@/lib/data";
 import { fetchBuyers, createBuyer, updateBuyer, deleteBuyer, importBuyers, bulkDeleteBuyers, bulkUpdateBuyersStatus } from "@/lib/api";
 import { Buyer } from "@/types";
-import { Search, Plus, Edit2, Trash2, ExternalLink, X, Loader2, Upload, Download, CheckCircle, AlertCircle, ChevronLeft, ChevronRight } from "lucide-react";
+import { Search, Plus, Edit2, Trash2, ExternalLink, X, Loader2, Upload, Download, CheckCircle, AlertCircle, ChevronLeft, ChevronRight, FileSpreadsheet } from "lucide-react";
+import * as XLSX from "xlsx";
 
 const CATEGORIES = ["Textiles","Electronics","Furniture","Home Goods","Sportswear","Ceramics","Leather Goods"];
 const STATUSES = ["Active","Inactive","Prospect"] as const;
 const COUNTRIES = ["Norway","Germany","USA","UAE","Australia","Canada","Japan","Spain","UK","France","India","China","Brazil","Egypt","Nigeria","South Korea","Sweden","Switzerland","New Zealand"];
 const PAGE_SIZES = [25, 50, 100];
 
-// ---- CSV helpers ----
-function parseCSV(text: string): any[] {
-  const lines = text.trim().split(/\r?\n/);
-  if (lines.length < 2) return [];
-  const headers = lines[0].split(",").map(h => h.trim().replace(/^"|"$/g, "").toLowerCase().replace(/\s+/g, "_"));
-  return lines.slice(1).filter(l => l.trim()).map(line => {
-    // Handle quoted fields properly
-    const vals: string[] = [];
-    let cur = "", inQ = false;
-    for (let i = 0; i < line.length; i++) {
-      if (line[i] === '"') { inQ = !inQ; }
-      else if (line[i] === ',' && !inQ) { vals.push(cur.trim()); cur = ""; }
-      else { cur += line[i]; }
-    }
-    vals.push(cur.trim());
+// ---- Excel helpers ----
+function parseExcel(buffer: ArrayBuffer): any[] {
+  const wb = XLSX.read(buffer, { type: "array" });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const rows: any[] = XLSX.utils.sheet_to_json(ws, { defval: "" });
+  return rows.map(row => {
     const obj: any = {};
-    headers.forEach((h, i) => { obj[h] = (vals[i] || "").replace(/^"|"$/g, "").trim(); });
+    Object.keys(row).forEach(k => {
+      const key = k.trim().toLowerCase().replace(/\s+/g, "_");
+      obj[key] = String(row[k] ?? "").trim();
+    });
     return obj;
   });
 }
 
-// ---- CSV Import Modal ----
+// ---- Excel Import Modal ----
 function CSVImportModal({ onClose, onImported }: { onClose: () => void; onImported: (rows: Buyer[]) => void }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<any[]>([]);
@@ -44,14 +39,14 @@ function CSVImportModal({ onClose, onImported }: { onClose: () => void; onImport
   const [error, setError] = useState("");
 
   const downloadTemplate = () => {
-    const csv = [
-      "company_name,country,contact_person,email,phone,website,linkedin,category,status,notes",
-      "Acme Corp,USA,John Smith,john@acme.com,+1 555 000 1234,acme.com,,Textiles,Active,Key buyer",
-      "Beta Imports,Germany,Hans Müller,hans@beta.de,+49 30 000 0000,,, Electronics,Active,",
-    ].join("\n");
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
-    a.download = "buyers_template.csv"; a.click();
+    const ws = XLSX.utils.aoa_to_sheet([
+      ["company_name","country","contact_person","email","phone","website","linkedin","category","status","notes"],
+      ["Acme Corp","USA","John Smith","john@acme.com","+1 555 000 1234","acme.com","","Textiles","Active","Key buyer"],
+      ["Beta Imports","Germany","Hans Müller","hans@beta.de","+49 30 000 0000","","","Electronics","Active",""],
+    ]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Buyers");
+    XLSX.writeFile(wb, "buyers_template.xlsx");
   };
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -60,13 +55,13 @@ function CSVImportModal({ onClose, onImported }: { onClose: () => void; onImport
     const reader = new FileReader();
     reader.onload = ev => {
       try {
-        const rows = parseCSV(ev.target?.result as string);
-        if (rows.length === 0) { setError("No valid rows found. Check CSV format."); return; }
+        const rows = parseExcel(ev.target?.result as ArrayBuffer);
+        if (rows.length === 0) { setError("No valid rows found. Check that your Excel file has a header row and data."); return; }
         setAllRows(rows);
         setPreview(rows.slice(0, 5));
-      } catch { setError("Could not parse CSV. Make sure it's a valid CSV file."); }
+      } catch { setError("Could not read Excel file. Make sure it's a valid .xlsx file."); }
     };
-    reader.readAsText(f);
+    reader.readAsArrayBuffer(f);
   };
 
   const handleImport = async () => {
@@ -84,14 +79,14 @@ function CSVImportModal({ onClose, onImported }: { onClose: () => void; onImport
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
         <div className="flex items-center justify-between p-4 border-b">
-          <h2 className="font-semibold text-gray-900">Import Buyers from CSV</h2>
+          <h2 className="font-semibold text-gray-900">Import Buyers from Excel</h2>
           <button onClick={onClose}><X size={18} className="text-gray-400" /></button>
         </div>
         <div className="p-4 space-y-4 overflow-y-auto flex-1">
           <div className="bg-blue-50 border border-blue-200 rounded p-3 text-xs text-blue-800 space-y-1">
             <p className="font-semibold">Required columns: <span className="font-mono">company_name</span></p>
             <p>Optional: <span className="font-mono">country, contact_person, email, phone, website, linkedin, category, status, notes, buyer_id</span></p>
-            <p className="text-blue-600">If <span className="font-mono">buyer_id</span> is included and already exists, that row will be updated (upsert).</p>
+            <p className="text-blue-600">If <span className="font-mono">buyer_id</span> is included and already exists, that row will be updated (upsert). Commas in data are fully supported in Excel — no escaping needed!</p>
           </div>
 
           <button onClick={downloadTemplate} className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-gray-200 rounded hover:bg-gray-50 text-gray-600">
@@ -105,10 +100,10 @@ function CSVImportModal({ onClose, onImported }: { onClose: () => void; onImport
             onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) { const dt = new DataTransfer(); dt.items.add(f); fileRef.current!.files = dt.files; handleFile({ target: fileRef.current! } as any); }}}
           >
             <Upload size={28} className="mx-auto text-gray-400 mb-2" />
-            <p className="text-sm font-medium text-gray-700">{fileName || "Click or drag & drop your CSV"}</p>
+            <p className="text-sm font-medium text-gray-700">{fileName || "Click or drag & drop your Excel file (.xlsx)"}</p>
             {allRows.length > 0 && <p className="text-xs text-blue-600 mt-1">{allRows.length} rows ready to import</p>}
           </div>
-          <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden" onChange={handleFile} />
+          <input ref={fileRef} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" className="hidden" onChange={handleFile} />
 
           {preview.length > 0 && (
             <div>
@@ -287,7 +282,7 @@ export default function BuyersPage() {
       <PageHeader title="Buyer Management" subtitle={`${buyers.length} buyers total`}
         action={
           <div className="flex items-center gap-2">
-            <button onClick={() => setImportModal(true)} className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 text-gray-700 text-sm rounded hover:bg-gray-50"><Upload size={15} />Import CSV</button>
+            <button onClick={() => setImportModal(true)} className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 text-gray-700 text-sm rounded hover:bg-gray-50"><FileSpreadsheet size={15} />Import Excel</button>
             <button onClick={() => setModal({ open: true })} className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"><Plus size={15} />Add Buyer</button>
           </div>
         } />

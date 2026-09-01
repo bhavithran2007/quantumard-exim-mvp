@@ -13,7 +13,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       SET buyer=${b.buyer}, supplier=${b.supplier||null}, product=${b.product},
           quantity=${b.quantity}, unit=${b.unit},
           cost_price=${b.cost_price}, selling_price=${b.selling_price},
-          status=${b.status}, updated_at=NOW()
+          status=${b.status}
       WHERE id=${id}
       RETURNING *`;
     if (!rows[0]) return NextResponse.json({ error: "Not found" }, { status: 404 });
