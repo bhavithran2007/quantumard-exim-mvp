@@ -54,6 +54,7 @@ export default function LoginPage() {
   const quickLogin = async (demoEmail: string) => {
     setEmail(demoEmail);
     setPassword("demo123");
+    // Use the values directly instead of relying on state update
     await doLogin(demoEmail, "demo123");
   };
 
@@ -82,6 +83,7 @@ export default function LoginPage() {
           </p>
         </div>
 
+        {/* Features */}
         <div className="space-y-4">
           {[
             { label: "Buyer & Supplier CRM", desc: "Track every relationship" },
@@ -107,6 +109,7 @@ export default function LoginPage() {
       {/* Right Panel */}
       <div className="flex-1 flex items-center justify-center p-6">
         <div className="w-full max-w-md">
+          {/* Mobile logo */}
           <div className="lg:hidden flex items-center gap-2 mb-8">
             <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
               <Globe size={18} className="text-white" />
@@ -119,6 +122,7 @@ export default function LoginPage() {
             <p className="text-gray-500 text-sm mt-1">Sign in to your account to continue</p>
           </div>
 
+          {/* Demo accounts */}
           <div className="mb-6">
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
               Quick Demo Login
@@ -138,6 +142,7 @@ export default function LoginPage() {
             <p className="text-xs text-gray-400 mt-1.5">Password for all demo accounts: <code className="bg-gray-100 px-1 rounded">demo123</code></p>
           </div>
 
+          {/* Form */}
           <form onSubmit={handleLogin} className="space-y-4">
             {error && (
               <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 px-3 py-2.5 rounded-lg text-sm">
@@ -194,6 +199,7 @@ export default function LoginPage() {
             </button>
           </form>
 
+          {/* Role info */}
           <div className="mt-8 border border-gray-200 rounded-lg p-4">
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Available Roles</p>
             <div className="space-y-2">

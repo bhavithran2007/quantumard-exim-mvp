@@ -1,22 +1,25 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import PageHeader from "@/components/ui/PageHeader";
 import StatusBadge from "@/components/ui/StatusBadge";
-import { samples as initialSamples } from "@/lib/data";
-import { Sample } from "@/types";
+import { fetchSamples, createSample, updateSample, deleteSample } from "@/lib/api";
 import { Search, Plus, Edit2, Trash2, X } from "lucide-react";
 
 const STATUSES = ["Requested", "Sent", "Delivered", "Approved", "Rejected"] as const;
 
-function SampleModal({ sample, onClose, onSave }: { sample?: Sample; onClose: () => void; onSave: (s: Sample) => void }) {
-  const [form, setForm] = useState<Partial<Sample>>(sample || { status: "Requested" });
-  const set = (k: keyof Sample, v: string) => setForm(f => ({ ...f, [k]: v }));
+function SampleModal({ sample, onClose, onSave }: { sample?: any; onClose: () => void; onSave: (s: any) => void }) {
+  const [form, setForm] = useState<any>(sample ? {
+    buyer: sample.buyer, supplier: sample.supplier, product: sample.product,
+    courier: sample.courier, tracking_number: sample.tracking_number || sample.trackingNumber,
+    status: sample.status,
+  } : { status: "Requested" });
+  const [saving, setSaving] = useState(false);
+  const set = (k: string, v: string) => setForm((f: any) => ({ ...f, [k]: v }));
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!form.buyer || !form.product) return alert("Buyer and product required");
-    const id = sample?.id || String(Date.now());
-    const sampleId = sample?.sampleId || `SMP-${String(Date.now()).slice(-3)}`;
-    onSave({ ...form, id, sampleId, createdAt: sample?.createdAt || new Date().toISOString().split("T")[0] } as Sample);
+    setSaving(true);
+    try { await onSave(form); } finally { setSaving(false); }
   };
 
   return (
@@ -32,34 +35,36 @@ function SampleModal({ sample, onClose, onSave }: { sample?: Sample; onClose: ()
             { label: "Supplier", key: "supplier" },
             { label: "Product *", key: "product", full: true },
             { label: "Courier", key: "courier" },
-            { label: "Tracking Number", key: "trackingNumber" },
+            { label: "Tracking Number", key: "tracking_number" },
           ].map(({ label, key, full }) => (
             <div key={key} className={full ? "col-span-2" : ""}>
               <label className="text-xs text-gray-500 block mb-1">{label}</label>
               <input className="w-full border border-gray-200 rounded px-2.5 py-1.5 text-sm focus:outline-none focus:border-blue-400"
-                value={(form as any)[key] || ""} onChange={e => set(key as keyof Sample, e.target.value)} />
+                value={form[key] || ""} onChange={e => set(key, e.target.value)} />
             </div>
           ))}
           <div>
             <label className="text-xs text-gray-500 block mb-1">Status</label>
             <select className="w-full border border-gray-200 rounded px-2.5 py-1.5 text-sm focus:outline-none focus:border-blue-400"
-              value={form.status || "Requested"} onChange={e => set("status", e.target.value as Sample["status"])}>
+              value={form.status || "Requested"} onChange={e => set("status", e.target.value)}>
               {STATUSES.map(s => <option key={s}>{s}</option>)}
             </select>
           </div>
         </div>
         <div className="flex justify-end gap-2 p-4 border-t">
           <button onClick={onClose} className="px-3 py-1.5 text-sm border border-gray-200 rounded text-gray-600">Cancel</button>
-          <button onClick={handleSubmit} className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700">Save</button>
+          <button onClick={handleSubmit} disabled={saving} className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-60">
+            {saving ? "Saving..." : "Save"}
+          </button>
         </div>
       </div>
     </div>
   );
 }
 
-const STATUS_STEPS: Sample["status"][] = ["Requested", "Sent", "Delivered", "Approved"];
+const STATUS_STEPS = ["Requested", "Sent", "Delivered", "Approved"];
 
-function StatusTimeline({ status }: { status: Sample["status"] }) {
+function StatusTimeline({ status }: { status: string }) {
   if (status === "Rejected") return <span className="text-xs text-red-600 font-medium">Rejected</span>;
   const currentIdx = STATUS_STEPS.indexOf(status);
   return (
@@ -75,27 +80,52 @@ function StatusTimeline({ status }: { status: Sample["status"] }) {
 }
 
 export default function SamplesPage() {
-  const [samples, setSamples] = useState(initialSamples);
+  const [samples, setSamples] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("All");
-  const [modal, setModal] = useState<{ open: boolean; sample?: Sample }>({ open: false });
+  const [modal, setModal] = useState<{ open: boolean; sample?: any }>({ open: false });
+
+  const load = async () => {
+    try {
+      setLoading(true); setError("");
+      setSamples(await fetchSamples());
+    } catch (e: any) { setError(e.message); } finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(); }, []);
 
   const filtered = samples.filter(s =>
     (s.buyer.toLowerCase().includes(search.toLowerCase()) ||
     s.product.toLowerCase().includes(search.toLowerCase()) ||
-    s.sampleId.toLowerCase().includes(search.toLowerCase())) &&
+    (s.sample_id || s.sampleId || "").toLowerCase().includes(search.toLowerCase())) &&
     (filterStatus === "All" || s.status === filterStatus)
   );
 
-  const handleSave = (s: Sample) => {
-    setSamples(prev => prev.find(x => x.id === s.id) ? prev.map(x => x.id === s.id ? s : x) : [...prev, s]);
+  const handleSave = async (form: any) => {
+    if (modal.sample) {
+      const updated = await updateSample(modal.sample.id, form);
+      setSamples(prev => prev.map(x => x.id === modal.sample.id ? updated : x));
+    } else {
+      const created = await createSample(form);
+      setSamples(prev => [created, ...prev]);
+    }
     setModal({ open: false });
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm("Delete this sample?")) return;
+    await deleteSample(id);
+    setSamples(prev => prev.filter(x => x.id !== id));
   };
 
   return (
     <div className="p-6">
       <PageHeader title="Sample Tracker" subtitle={`${samples.length} samples tracked`}
         action={<button onClick={() => setModal({ open: true })} className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"><Plus size={15} />Add Sample</button>} />
+
+      {error && <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded text-sm">{error} <button onClick={load} className="underline ml-2">Retry</button></div>}
 
       <div className="flex gap-3 mb-4">
         <div className="relative">
@@ -120,27 +150,29 @@ export default function SamplesPage() {
             </tr>
           </thead>
           <tbody>
-            {filtered.map(s => (
+            {loading ? (
+              <tr><td colSpan={9} className="text-center py-8 text-gray-400 text-sm">Loading...</td></tr>
+            ) : filtered.map(s => (
               <tr key={s.id} className="border-b border-gray-100 hover:bg-gray-50">
-                <td className="px-4 py-3 text-xs font-mono text-blue-600">{s.sampleId}</td>
+                <td className="px-4 py-3 text-xs font-mono text-blue-600">{s.sample_id || s.sampleId}</td>
                 <td className="px-4 py-3 font-medium text-gray-900">{s.buyer}</td>
-                <td className="px-4 py-3 text-gray-600">{s.supplier}</td>
+                <td className="px-4 py-3 text-gray-600">{s.supplier || "—"}</td>
                 <td className="px-4 py-3 text-gray-600">{s.product}</td>
                 <td className="px-4 py-3 text-gray-600">{s.courier || "—"}</td>
-                <td className="px-4 py-3 text-xs font-mono text-gray-500">{s.trackingNumber || "—"}</td>
+                <td className="px-4 py-3 text-xs font-mono text-gray-500">{s.tracking_number || s.trackingNumber || "—"}</td>
                 <td className="px-4 py-3"><StatusTimeline status={s.status} /></td>
                 <td className="px-4 py-3"><StatusBadge status={s.status} /></td>
                 <td className="px-4 py-3">
                   <div className="flex gap-1">
                     <button onClick={() => setModal({ open: true, sample: s })} className="p-1 text-gray-400 hover:text-blue-600"><Edit2 size={14} /></button>
-                    <button onClick={() => setSamples(prev => prev.filter(x => x.id !== s.id))} className="p-1 text-gray-400 hover:text-red-600"><Trash2 size={14} /></button>
+                    <button onClick={() => handleDelete(s.id)} className="p-1 text-gray-400 hover:text-red-600"><Trash2 size={14} /></button>
                   </div>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
-        {filtered.length === 0 && <div className="text-center py-8 text-gray-400 text-sm">No samples found</div>}
+        {!loading && filtered.length === 0 && <div className="text-center py-8 text-gray-400 text-sm">No samples found</div>}
       </div>
 
       {modal.open && <SampleModal sample={modal.sample} onClose={() => setModal({ open: false })} onSave={handleSave} />}
