@@ -188,7 +188,7 @@ export default function AnalyticsPage() {
             <ResponsiveContainer width="100%" height={200}>
               <PieChart>
                 <Pie data={revenueByCategory} cx="50%" cy="50%" outerRadius={75} dataKey="revenue" nameKey="category"
-                  label={({ category, percent }) => `${category} ${(percent * 100).toFixed(0)}%`} labelLine={false}>
+                  label={({ name, percent }: { name?: string; percent?: number }) => `${name ?? ""} ${((percent ?? 0) * 100).toFixed(0)}%`} labelLine={false}>
                   {revenueByCategory.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
                 </Pie>
                 <Tooltip formatter={(v: any) => formatCurrency(Number(v))} />
