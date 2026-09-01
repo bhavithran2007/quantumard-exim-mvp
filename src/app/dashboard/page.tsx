@@ -5,7 +5,6 @@ import PageHeader from "@/components/ui/PageHeader";
 import StatusBadge from "@/components/ui/StatusBadge";
 import { formatCurrency } from "@/lib/utils";
 import { fetchBuyers, fetchSuppliers, fetchRFQs, fetchQuotations, fetchOrders, fetchShipments } from "@/lib/api";
-import { revenueByMonth, revenueByCountry, revenueByCategory } from "@/lib/data";
 import { Users, Factory, FileQuestion, FileText, DollarSign, TrendingUp, Clock, ShoppingCart, Ship } from "lucide-react";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 
@@ -32,23 +31,73 @@ export default function Dashboard() {
   const openRfqs = rfqs.filter(r => r.status === "Open" || r.status === "In Progress").length;
   const pendingShipments = shipments.filter(s => s.status !== "Delivered").length;
 
-  const totalRevenue = quotations
-    .filter(q => q.status === "Accepted")
-    .reduce((s, q) => s + Number(q.selling_price ?? q.sellingPrice) * Number(q.quantity), 0);
+  const acceptedQuotes = quotations.filter(q => q.status === "Accepted");
 
-  const totalProfit = quotations
-    .filter(q => q.status === "Accepted")
-    .reduce((s, q) => {
-      const sell = Number(q.selling_price ?? q.sellingPrice);
-      const cost = Number(q.cost_price ?? q.costPrice);
-      return s + (sell - cost) * Number(q.quantity);
-    }, 0);
-
+  const totalRevenue = acceptedQuotes.reduce((s, q) => s + Number(q.selling_price ?? q.sellingPrice) * Number(q.quantity), 0);
+  const totalProfit = acceptedQuotes.reduce((s, q) => {
+    const sell = Number(q.selling_price ?? q.sellingPrice);
+    const cost = Number(q.cost_price ?? q.costPrice);
+    return s + (sell - cost) * Number(q.quantity);
+  }, 0);
   const pendingReceivables = orders
     .filter(o => o.status !== "Delivered")
     .reduce((s, o) => s + Number(o.order_value ?? o.orderValue ?? 0), 0);
-
   const profitMargin = totalRevenue > 0 ? ((totalProfit / totalRevenue) * 100).toFixed(1) : "0.0";
+
+  // ---- LIVE CHART DATA computed from DB records ----
+
+  // Revenue by month: group accepted quotations by created_at month
+  const revenueByMonth = (() => {
+    const map: Record<string, { revenue: number; orders: number }> = {};
+    acceptedQuotes.forEach(q => {
+      const date = new Date(q.created_at || q.createdAt || "");
+      if (isNaN(date.getTime())) return;
+      const key = date.toLocaleString("default", { month: "short", year: "2-digit" });
+      if (!map[key]) map[key] = { revenue: 0, orders: 0 };
+      map[key].revenue += Number(q.selling_price ?? q.sellingPrice) * Number(q.quantity);
+      map[key].orders += 1;
+    });
+    // Sort by date and take last 6 months
+    return Object.entries(map)
+      .sort(([a], [b]) => new Date("1 " + a).getTime() - new Date("1 " + b).getTime())
+      .slice(-6)
+      .map(([month, v]) => ({ month, ...v }));
+  })();
+
+  // Revenue by buyer country
+  const revenueByCountry = (() => {
+    const map: Record<string, number> = {};
+    acceptedQuotes.forEach(q => {
+      const buyer = buyers.find(b => (b.company_name || b.companyName) === (q.buyer));
+      const country = buyer?.country || "Other";
+      map[country] = (map[country] || 0) + Number(q.selling_price ?? q.sellingPrice) * Number(q.quantity);
+    });
+    return Object.entries(map)
+      .map(([country, revenue]) => ({ country, revenue }))
+      .sort((a, b) => b.revenue - a.revenue)
+      .slice(0, 7);
+  })();
+
+  // Revenue by product category (derived from buyers)
+  const revenueByCategory = (() => {
+    const map: Record<string, number> = {};
+    acceptedQuotes.forEach(q => {
+      const buyer = buyers.find(b => (b.company_name || b.companyName) === q.buyer);
+      const cat = buyer?.category || "Other";
+      map[cat] = (map[cat] || 0) + Number(q.selling_price ?? q.sellingPrice) * Number(q.quantity);
+    });
+    return Object.entries(map)
+      .map(([category, revenue]) => ({ category, revenue }))
+      .sort((a, b) => b.revenue - a.revenue);
+  })();
+
+  const ordersByStatus = [
+    { status: "Confirmed", count: orders.filter(o => o.status === "Confirmed").length },
+    { status: "Production", count: orders.filter(o => o.status === "Production").length },
+    { status: "Ready", count: orders.filter(o => o.status === "Ready").length },
+    { status: "Dispatched", count: orders.filter(o => o.status === "Dispatched").length },
+    { status: "Delivered", count: orders.filter(o => o.status === "Delivered").length },
+  ];
 
   return (
     <div className="p-6">
@@ -71,27 +120,25 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
         <div className="bg-white rounded-lg border border-gray-200 p-4">
           <h3 className="text-sm font-semibold text-gray-700 mb-4">Revenue Trend (Last 6 Months)</h3>
-          <ResponsiveContainer width="100%" height={200}>
-            <LineChart data={revenueByMonth}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="month" tick={{ fontSize: 11 }} />
-              <YAxis tick={{ fontSize: 11 }} tickFormatter={v => `$${(v/1000).toFixed(0)}k`} />
-              <Tooltip formatter={(v: any) => formatCurrency(Number(v))} />
-              <Line type="monotone" dataKey="revenue" stroke="#2563eb" strokeWidth={2} dot={{ r: 3 }} />
-            </LineChart>
-          </ResponsiveContainer>
+          {revenueByMonth.length > 0 ? (
+            <ResponsiveContainer width="100%" height={200}>
+              <LineChart data={revenueByMonth}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+                <YAxis tick={{ fontSize: 11 }} tickFormatter={v => `$${(v/1000).toFixed(0)}k`} />
+                <Tooltip formatter={(v: any) => formatCurrency(Number(v))} />
+                <Line type="monotone" dataKey="revenue" stroke="#2563eb" strokeWidth={2} dot={{ r: 3 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="h-[200px] flex items-center justify-center text-gray-400 text-sm">No accepted quotations yet</div>
+          )}
         </div>
 
         <div className="bg-white rounded-lg border border-gray-200 p-4">
           <h3 className="text-sm font-semibold text-gray-700 mb-4">Orders by Status</h3>
           <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={[
-              { status: "Confirmed", count: orders.filter(o => o.status === "Confirmed").length },
-              { status: "Production", count: orders.filter(o => o.status === "Production").length },
-              { status: "Ready", count: orders.filter(o => o.status === "Ready").length },
-              { status: "Dispatched", count: orders.filter(o => o.status === "Dispatched").length },
-              { status: "Delivered", count: orders.filter(o => o.status === "Delivered").length },
-            ]}>
+            <BarChart data={ordersByStatus}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
               <XAxis dataKey="status" tick={{ fontSize: 10 }} />
               <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
@@ -105,28 +152,36 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
         <div className="bg-white rounded-lg border border-gray-200 p-4">
           <h3 className="text-sm font-semibold text-gray-700 mb-4">Revenue by Country</h3>
-          <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={revenueByCountry} layout="vertical">
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis type="number" tick={{ fontSize: 11 }} tickFormatter={v => `$${(v/1000).toFixed(0)}k`} />
-              <YAxis type="category" dataKey="country" tick={{ fontSize: 11 }} width={80} />
-              <Tooltip formatter={(v: any) => formatCurrency(Number(v))} />
-              <Bar dataKey="revenue" fill="#6366f1" radius={[0,3,3,0]} />
-            </BarChart>
-          </ResponsiveContainer>
+          {revenueByCountry.length > 0 ? (
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={revenueByCountry} layout="vertical">
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <XAxis type="number" tick={{ fontSize: 11 }} tickFormatter={v => `$${(v/1000).toFixed(0)}k`} />
+                <YAxis type="category" dataKey="country" tick={{ fontSize: 11 }} width={80} />
+                <Tooltip formatter={(v: any) => formatCurrency(Number(v))} />
+                <Bar dataKey="revenue" fill="#6366f1" radius={[0,3,3,0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="h-[200px] flex items-center justify-center text-gray-400 text-sm">No data yet</div>
+          )}
         </div>
 
         <div className="bg-white rounded-lg border border-gray-200 p-4">
           <h3 className="text-sm font-semibold text-gray-700 mb-4">Revenue by Category</h3>
-          <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={revenueByCategory}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="category" tick={{ fontSize: 10 }} />
-              <YAxis tick={{ fontSize: 11 }} tickFormatter={v => `$${(v/1000).toFixed(0)}k`} />
-              <Tooltip formatter={(v: any) => formatCurrency(Number(v))} />
-              <Bar dataKey="revenue" fill="#10b981" radius={[3,3,0,0]} />
-            </BarChart>
-          </ResponsiveContainer>
+          {revenueByCategory.length > 0 ? (
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={revenueByCategory}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <XAxis dataKey="category" tick={{ fontSize: 10 }} />
+                <YAxis tick={{ fontSize: 11 }} tickFormatter={v => `$${(v/1000).toFixed(0)}k`} />
+                <Tooltip formatter={(v: any) => formatCurrency(Number(v))} />
+                <Bar dataKey="revenue" fill="#10b981" radius={[3,3,0,0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="h-[200px] flex items-center justify-center text-gray-400 text-sm">No data yet</div>
+          )}
         </div>
       </div>
 
@@ -192,6 +247,4 @@ export default function Dashboard() {
       </div>
     </div>
   );
-
-  
 }

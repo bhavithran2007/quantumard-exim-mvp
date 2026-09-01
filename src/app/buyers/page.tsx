@@ -1,16 +1,160 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import PageHeader from "@/components/ui/PageHeader";
 import StatusBadge from "@/components/ui/StatusBadge";
 import { buyers as demoBuyers } from "@/lib/data";
-import { fetchBuyers, createBuyer, updateBuyer, deleteBuyer } from "@/lib/api";
+import { fetchBuyers, createBuyer, updateBuyer, deleteBuyer, importBuyers } from "@/lib/api";
 import { Buyer } from "@/types";
-import { Search, Plus, Edit2, Trash2, ExternalLink, X, Loader2 } from "lucide-react";
+import { Search, Plus, Edit2, Trash2, ExternalLink, X, Loader2, Upload, Download, CheckCircle, AlertCircle } from "lucide-react";
 
 const CATEGORIES = ["Textiles","Electronics","Furniture","Home Goods","Sportswear","Ceramics","Leather Goods"];
 const STATUSES = ["Active","Inactive","Prospect"] as const;
 const COUNTRIES = ["Norway","Germany","USA","UAE","Australia","Canada","Japan","Spain","UK","France","India","China","Brazil","Egypt","Nigeria","South Korea","Sweden","Switzerland","New Zealand"];
 
+// ---- CSV Import Modal ----
+function CSVImportModal({ onClose, onImported }: { onClose: () => void; onImported: (rows: Buyer[]) => void }) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [preview, setPreview] = useState<any[]>([]);
+  const [fileName, setFileName] = useState("");
+  const [importing, setImporting] = useState(false);
+  const [result, setResult] = useState<{ imported: number; skipped: number } | null>(null);
+  const [error, setError] = useState("");
+
+  const BUYER_COLUMNS = ["company_name","country","contact_person","email","phone","website","linkedin","category","status","notes","buyer_id"];
+
+  const parseCSV = (text: string) => {
+    const lines = text.trim().split("\n");
+    const headers = lines[0].split(",").map(h => h.trim().replace(/^"|"$/g, "").toLowerCase().replace(/ /g,"_"));
+    return lines.slice(1).filter(l => l.trim()).map(line => {
+      const vals = line.match(/(".*?"|[^,]+|(?<=,)(?=,)|(?<=,)$|^(?=,))/g) || line.split(",");
+      const obj: any = {};
+      headers.forEach((h, i) => { obj[h] = (vals[i] || "").replace(/^"|"$/g, "").trim(); });
+      return obj;
+    });
+  };
+
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setFileName(f.name);
+    setResult(null);
+    setError("");
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        const rows = parseCSV(ev.target?.result as string);
+        setPreview(rows.slice(0, 5));
+      } catch { setError("Could not parse CSV. Please check the format."); }
+    };
+    reader.readAsText(f);
+  };
+
+  const handleImport = async () => {
+    if (!fileRef.current?.files?.[0]) return;
+    setImporting(true);
+    setError("");
+    try {
+      const text = await fileRef.current.files[0].text();
+      const rows = parseCSV(text);
+      const res = await importBuyers(rows);
+      setResult({ imported: res.imported, skipped: res.skipped });
+      onImported(res.rows.map(normalizeBuyer));
+    } catch (e: any) {
+      setError(e.message || "Import failed");
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const downloadTemplate = () => {
+    const header = "company_name,country,contact_person,email,phone,website,linkedin,category,status,notes";
+    const sample = "Acme Corp,USA,John Smith,john@acme.com,+1 555 000 1234,acme.com,,Textiles,Active,Good buyer";
+    const blob = new Blob([header + "\n" + sample], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = "buyers_template.csv"; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-lg shadow-xl w-full max-w-xl">
+        <div className="flex items-center justify-between p-4 border-b">
+          <h2 className="font-semibold text-gray-900">Import Buyers from CSV</h2>
+          <button onClick={onClose}><X size={18} className="text-gray-400" /></button>
+        </div>
+        <div className="p-4 space-y-4">
+          <div className="bg-blue-50 border border-blue-200 rounded p-3 text-xs text-blue-700 space-y-1">
+            <p className="font-medium">Expected columns (any order):</p>
+            <p className="font-mono">{BUYER_COLUMNS.join(", ")}</p>
+            <p className="text-blue-600">Only <strong>company_name</strong> is required. Existing buyer_id will be upserted.</p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button onClick={downloadTemplate} className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-gray-200 rounded hover:bg-gray-50 text-gray-600">
+              <Download size={14} />Download Template
+            </button>
+            <span className="text-xs text-gray-400">← start from here</span>
+          </div>
+
+          <div
+            className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center cursor-pointer hover:border-blue-400 transition-colors"
+            onClick={() => fileRef.current?.click()}
+          >
+            <Upload size={24} className="mx-auto text-gray-400 mb-2" />
+            <p className="text-sm text-gray-600">{fileName || "Click to choose CSV file"}</p>
+            <p className="text-xs text-gray-400 mt-1">or drag and drop</p>
+            <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={handleFile} />
+          </div>
+
+          {preview.length > 0 && (
+            <div>
+              <p className="text-xs font-medium text-gray-500 mb-1">Preview (first {preview.length} rows):</p>
+              <div className="overflow-x-auto border border-gray-200 rounded text-xs">
+                <table className="w-full">
+                  <thead className="bg-gray-50">
+                    <tr>{Object.keys(preview[0]).map(k => <th key={k} className="px-2 py-1.5 text-left font-medium text-gray-500 whitespace-nowrap">{k}</th>)}</tr>
+                  </thead>
+                  <tbody>
+                    {preview.map((row, i) => (
+                      <tr key={i} className="border-t border-gray-100">
+                        {Object.values(row).map((v: any, j) => <td key={j} className="px-2 py-1.5 text-gray-700 max-w-[120px] truncate">{v}</td>)}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {error && (
+            <div className="flex items-center gap-2 text-red-600 text-sm bg-red-50 border border-red-200 rounded p-2">
+              <AlertCircle size={16} />{error}
+            </div>
+          )}
+          {result && (
+            <div className="flex items-center gap-2 text-green-700 text-sm bg-green-50 border border-green-200 rounded p-2">
+              <CheckCircle size={16} />
+              <span>Imported <strong>{result.imported}</strong> buyers successfully{result.skipped > 0 ? `, ${result.skipped} skipped` : ""}.</span>
+            </div>
+          )}
+        </div>
+
+        <div className="flex justify-end gap-2 p-4 border-t">
+          <button onClick={onClose} className="px-3 py-1.5 text-sm text-gray-600 border border-gray-200 rounded hover:bg-gray-50">
+            {result ? "Close" : "Cancel"}
+          </button>
+          {!result && (
+            <button onClick={handleImport} disabled={importing || preview.length === 0} className="px-3 py-1.5 text-sm text-white bg-blue-600 rounded hover:bg-blue-700 flex items-center gap-1.5 disabled:opacity-60">
+              {importing && <Loader2 size={13} className="animate-spin" />}Import
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---- Add/Edit Modal ----
 function BuyerModal({ buyer, onClose, onSave }: { buyer?: Buyer; onClose: () => void; onSave: (b: Buyer) => void }) {
   const [form, setForm] = useState<Partial<Buyer>>(buyer || { status: "Active", country: "USA", category: "Textiles" });
   const [saving, setSaving] = useState(false);
@@ -21,29 +165,17 @@ function BuyerModal({ buyer, onClose, onSave }: { buyer?: Buyer; onClose: () => 
     setSaving(true);
     try {
       const payload = {
-        company_name: form.companyName,
-        country: form.country,
-        contact_person: form.contactPerson,
-        email: form.email,
-        phone: form.phone,
-        website: form.website,
-        linkedin: form.linkedin,
-        category: form.category,
-        status: form.status || "Active",
-        notes: form.notes,
+        company_name: form.companyName, country: form.country,
+        contact_person: form.contactPerson, email: form.email, phone: form.phone,
+        website: form.website, linkedin: form.linkedin, category: form.category,
+        status: form.status || "Active", notes: form.notes,
       };
       let result;
-      if (buyer?.id) {
-        result = await updateBuyer(buyer.id, payload);
-      } else {
-        result = await createBuyer(payload);
-      }
+      if (buyer?.id) { result = await updateBuyer(buyer.id, payload); }
+      else { result = await createBuyer(payload); }
       onSave(normalizeBuyer(result));
-    } catch {
-      alert("Failed to save. Please try again.");
-    } finally {
-      setSaving(false);
-    }
+    } catch { alert("Failed to save. Please try again."); }
+    finally { setSaving(false); }
   };
 
   return (
@@ -108,19 +240,13 @@ function BuyerModal({ buyer, onClose, onSave }: { buyer?: Buyer; onClose: () => 
 
 function normalizeBuyer(b: any): Buyer {
   return {
-    id: b.id,
-    buyerId: b.buyer_id || b.buyerId || "",
+    id: b.id, buyerId: b.buyer_id || b.buyerId || "",
     companyName: b.company_name || b.companyName || "",
-    country: b.country || "",
-    contactPerson: b.contact_person || b.contactPerson || "",
-    email: b.email || "",
-    phone: b.phone || "",
-    website: b.website,
-    linkedin: b.linkedin,
-    category: b.category || "",
-    status: b.status || "Active",
-    notes: b.notes,
-    createdAt: b.created_at || b.createdAt || "",
+    country: b.country || "", contactPerson: b.contact_person || b.contactPerson || "",
+    email: b.email || "", phone: b.phone || "",
+    website: b.website, linkedin: b.linkedin,
+    category: b.category || "", status: b.status || "Active",
+    notes: b.notes, createdAt: b.created_at || b.createdAt || "",
   };
 }
 
@@ -131,13 +257,12 @@ export default function BuyersPage() {
   const [filterStatus, setFilterStatus] = useState("All");
   const [filterCategory, setFilterCategory] = useState("All");
   const [modal, setModal] = useState<{ open: boolean; buyer?: Buyer }>({ open: false });
+  const [importModal, setImportModal] = useState(false);
   const [viewBuyer, setViewBuyer] = useState<Buyer | null>(null);
 
   useEffect(() => {
     fetchBuyers()
-      .then(data => {
-        if (data && data.length > 0) setBuyers(data.map(normalizeBuyer));
-      })
+      .then(data => { if (data && data.length > 0) setBuyers(data.map(normalizeBuyer)); })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
@@ -156,20 +281,36 @@ export default function BuyersPage() {
     setModal({ open: false });
   };
 
+  const handleImported = (rows: Buyer[]) => {
+    setBuyers(prev => {
+      const updated = [...prev];
+      rows.forEach(r => {
+        const idx = updated.findIndex(x => x.id === r.id);
+        if (idx >= 0) updated[idx] = r; else updated.unshift(r);
+      });
+      return updated;
+    });
+  };
+
   const handleDelete = async (id: string) => {
     if (!confirm("Delete this buyer?")) return;
-    try {
-      await deleteBuyer(id);
-      setBuyers(prev => prev.filter(b => b.id !== id));
-    } catch {
-      alert("Failed to delete");
-    }
+    try { await deleteBuyer(id); setBuyers(prev => prev.filter(b => b.id !== id)); }
+    catch { alert("Failed to delete"); }
   };
 
   return (
     <div className="p-6">
       <PageHeader title="Buyer Management" subtitle={`${buyers.length} buyers total`}
-        action={<button onClick={() => setModal({ open: true })} className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"><Plus size={15} />Add Buyer</button>} />
+        action={
+          <div className="flex items-center gap-2">
+            <button onClick={() => setImportModal(true)} className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 text-gray-700 text-sm rounded hover:bg-gray-50">
+              <Upload size={15} />Import CSV
+            </button>
+            <button onClick={() => setModal({ open: true })} className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">
+              <Plus size={15} />Add Buyer
+            </button>
+          </div>
+        } />
 
       <div className="flex flex-wrap gap-3 mb-4">
         <div className="relative">
@@ -221,6 +362,7 @@ export default function BuyersPage() {
       </div>
 
       {modal.open && <BuyerModal buyer={modal.buyer} onClose={() => setModal({ open: false })} onSave={handleSave} />}
+      {importModal && <CSVImportModal onClose={() => setImportModal(false)} onImported={handleImported} />}
 
       {viewBuyer && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">

@@ -32,6 +32,12 @@ export async function deleteBuyer(id: string) {
   const r = await fetch(`/api/buyers/${id}`, { method: "DELETE" });
   if (!r.ok) throw new Error(`Delete buyer failed (${r.status})`);
 }
+export async function importBuyers(rows: any[]) {
+  return handleResponse(await fetch("/api/buyers/import", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ rows }),
+  }), "Import buyers");
+}
 
 // ---- SUPPLIERS ----
 export async function fetchSuppliers() {
@@ -52,6 +58,12 @@ export async function updateSupplier(id: string, data: any) {
 export async function deleteSupplier(id: string) {
   const r = await fetch(`/api/suppliers/${id}`, { method: "DELETE" });
   if (!r.ok) throw new Error(`Delete supplier failed (${r.status})`);
+}
+export async function importSuppliers(rows: any[]) {
+  return handleResponse(await fetch("/api/suppliers/import", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ rows }),
+  }), "Import suppliers");
 }
 
 // ---- RFQs ----
