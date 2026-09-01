@@ -191,3 +191,23 @@ export async function deleteCRMLead(id: string) {
   const r = await fetch(`/api/crm/${id}`, { method: "DELETE" });
   if (!r.ok) throw new Error(`Delete lead failed (${r.status})`);
 }
+
+// ---- BULK OPERATIONS ----
+export async function bulkDeleteBuyers(ids: string[]) {
+  return handleResponse(await fetch("/api/buyers/bulk", {
+    method: "DELETE", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids }),
+  }), "Bulk delete buyers");
+}
+export async function bulkUpdateBuyersStatus(ids: string[], status: string) {
+  return handleResponse(await fetch("/api/buyers/bulk", {
+    method: "PATCH", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids, status }),
+  }), "Bulk update buyers");
+}
+export async function bulkDeleteSuppliers(ids: string[]) {
+  return handleResponse(await fetch("/api/suppliers/bulk", {
+    method: "DELETE", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids }),
+  }), "Bulk delete suppliers");
+}
